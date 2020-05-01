@@ -7,6 +7,10 @@
     <groupId>com.github.sioncheng</groupId>
     <artifactId>akamq</artifactId>
     <version>1.0-SNAPSHOT</version>
+    <modules>
+        <module>akamq-broker</module>
+    </modules>
 
+    <packaging>pom</packaging>
     
 </project>
