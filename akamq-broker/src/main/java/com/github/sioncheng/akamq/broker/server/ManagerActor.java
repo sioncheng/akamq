@@ -20,5 +20,6 @@ public class ManagerActor extends AbstractActor {
 
     private void processAny(Object o) {
 
+        System.out.println(o);
     }
 }

@@ -3,6 +3,8 @@ package com.github.sioncheng.akamq.broker.server;
 import akka.actor.AbstractActor;
 import akka.actor.ActorRef;
 import akka.actor.Props;
+import akka.event.Logging;
+import akka.event.LoggingAdapter;
 import akka.io.Tcp;
 import akka.io.TcpMessage;
 
@@ -18,9 +20,12 @@ public class ServerActor extends AbstractActor {
 
     final ServerActorConfiguration serverActorConfiguration;
 
+    final LoggingAdapter log;
+
     public ServerActor(ActorRef manager, ServerActorConfiguration serverActorConfiguration) {
         this.manager = manager;
         this.serverActorConfiguration = serverActorConfiguration;
+        this.log = Logging.getLogger(getContext().getSystem(), "server-actor");
     }
 
     public static Props props(ActorRef manager, ServerActorConfiguration serverActorConfiguration) {
@@ -54,9 +59,11 @@ public class ServerActor extends AbstractActor {
     }
 
     private void processConnected(Tcp.Connected connected) {
+        log.info("ServerActor->processConnected {}", connected);
+
         manager.tell(connected, getSelf());
 
-        final ActorRef handler = getContext().actorOf(ClientHandler.props(getSelf(), connected.remoteAddress()));
+        final ActorRef handler = getContext().actorOf(ClientActor.props(getSelf(), connected.remoteAddress(), manager));
         getSender().tell(TcpMessage.register(handler), getSelf());
     }
 

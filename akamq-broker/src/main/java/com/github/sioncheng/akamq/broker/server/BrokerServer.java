@@ -3,11 +3,13 @@ package com.github.sioncheng.akamq.broker.server;
 import akka.actor.ActorRef;
 import akka.actor.ActorSystem;
 import com.github.sioncheng.akamq.broker.conf.BrokerConfiguration;
+import lombok.extern.slf4j.Slf4j;
 
 /**
  * @author cyq
  * @create 2020-05-01 7:28 PM
  */
+@Slf4j
 public class BrokerServer{
     private BrokerConfiguration configuration;
 
@@ -33,6 +35,8 @@ public class BrokerServer{
             return;
         }
 
+        log.info("BrokerServer->start");
+
         this.started = true;
 
         this.actorSystem = ActorSystem.create("broker-server");
@@ -47,6 +51,8 @@ public class BrokerServer{
     }
 
     public void stop() {
+
+        log.info("BrokerServer->stop");
 
         if (null != this.actorSystem) {
             this.actorSystem.terminate();
