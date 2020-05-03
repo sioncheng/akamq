@@ -63,12 +63,12 @@ public class ServerActor extends AbstractActor {
 
         manager.tell(connected, getSelf());
 
-        final ActorRef handler = getContext().actorOf(ClientActor.props(getSelf(), connected.remoteAddress(), manager));
+        final ActorRef handler = getContext().actorOf(ClientActor.props(getSender(), connected.remoteAddress(), manager));
         getSender().tell(TcpMessage.register(handler), getSelf());
     }
 
     private void processAny(Object o) {
-
+        log.info("ServerActor->processAny {}", o);
     }
 
 }

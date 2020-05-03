@@ -9,11 +9,11 @@ import akka.io.Tcp;
 import akka.io.TcpMessage;
 import akka.util.ByteIterator;
 import akka.util.ByteString;
-import com.github.sioncheng.akamq.mqtt.MQTTConnectFlags;
-import com.github.sioncheng.akamq.mqtt.MQTTFixHeader;
-import com.github.sioncheng.akamq.mqtt.MQTTMessageType;
+import com.github.sioncheng.akamq.mqtt.*;
 
 import java.net.InetSocketAddress;
+import java.util.ArrayList;
+import java.util.List;
 
 /**
  * @author cyq
@@ -53,6 +53,7 @@ public class ClientActor extends AbstractActor {
     public Receive createReceive() {
         return receiveBuilder().match(Tcp.Received.class, this::processReceived)
                 .match(Tcp.ConnectionClosed.class, this::processConnectionClosed)
+                .match(ByteString.class, this::processByteString)
                 .build();
     }
 
@@ -73,7 +74,10 @@ public class ClientActor extends AbstractActor {
 
 
         //fix header
-        final byte head1 = iterator.getByte();
+        int head1 = iterator.getByte();
+        if (head1 < 0) {
+            head1 += 256;
+        }
         int messageType = head1 >> 4;
         int dupFlag = (head1 >> 3) & 1;
         int qosLevel = (head1 >> 1) & 3;
@@ -102,6 +106,10 @@ public class ClientActor extends AbstractActor {
             switch (messageType) {
                 case MQTTMessageType.CONNECT:
                     processConnect(fixHeader, iterator);
+                    this.status = 1;
+                    break;
+                case MQTTMessageType.SUBSCRIBE:
+                    processSubscribe(fixHeader, iterator);
                     break;
                 default:
                     break;
@@ -180,13 +188,56 @@ public class ClientActor extends AbstractActor {
         }
 
         //
+        MQTTConnectPayload mqttConnectPayload = MQTTConnectPayload.builder()
+                .clientId(clientId)
+                .willTopic(willTopic)
+                .willMessage(willMessage)
+                .username(username)
+                .password(password)
+                .build();
 
-        log.info("ClientActor->processConnect {}", clientId);
-        log.info("ClientActor->processConnect {}", willTopic);
-        log.info("ClientActor->processConnect {}", willMessage);
-        log.info("ClientActor->processConnect {}", username);
-        log.info("ClientActor->processConnect {}", password);
+        log.info("ClientActor->processConnect {}", mqttConnectPayload);
 
+        MQTTConnect mqttConnect = MQTTConnect.builder()
+                .connectFlags(mqttConnectFlags)
+                .connectPayload(mqttConnectPayload)
+                .build();
+
+        manager.tell(mqttConnect, getSelf());
+    }
+
+    private void processSubscribe(MQTTFixHeader mqttFixHeader, ByteIterator iterator) {
+        log.info("ClientActor->processSubscribe {} {}", mqttFixHeader, iterator);
+
+        int id = iterator.next() * 128 + iterator.next();
+
+        List<MQTTSubscribeTopic> topics = new ArrayList<>(4);
+        while (true) {
+            String topic = takeString(iterator);
+            if (null == topic) {
+                break;
+            }
+            int qos = iterator.next();
+
+            MQTTSubscribeTopic subscribeTopic = MQTTSubscribeTopic.builder()
+                    .topicFilter(topic)
+                    .requestQos(qos)
+                    .build();
+
+            topics.add(subscribeTopic);
+
+            log.info("ClientActor->processSubscribe {}", subscribeTopic);
+        }
+
+        MQTTSubscribePayload mqttSubscribePayload = MQTTSubscribePayload.builder()
+                .topics(topics)
+                .build();
+
+        MQTTSubscribe mqttSubscribe = MQTTSubscribe.builder()
+                .payload(mqttSubscribePayload)
+                .build();
+
+        manager.tell(mqttSubscribe, getSelf());
     }
 
     private String takeString(ByteIterator iterator) {
@@ -200,5 +251,11 @@ public class ClientActor extends AbstractActor {
 
     private void processConnectionClosed(Tcp.ConnectionClosed connectionClosed) {
         getContext().stop(getSelf());
+    }
+
+    private void processByteString(ByteString byteString) {
+        log.info("ClientActor->processByteString {}", byteString);
+
+        connection.tell(TcpMessage.write(byteString), getSelf());
     }
 }
