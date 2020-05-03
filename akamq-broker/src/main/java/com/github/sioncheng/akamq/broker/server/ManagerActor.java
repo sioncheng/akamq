@@ -5,9 +5,11 @@ import akka.actor.Props;
 import akka.event.Logging;
 import akka.event.LoggingAdapter;
 import akka.util.ByteString;
+import akka.util.ByteStringBuilder;
 import com.github.sioncheng.akamq.mqtt.MQTTConnect;
 import com.github.sioncheng.akamq.mqtt.MQTTMessageType;
 import com.github.sioncheng.akamq.mqtt.MQTTSubscribe;
+import com.github.sioncheng.akamq.mqtt.MQTTSubscribeTopic;
 
 /**
  * @author cyq
@@ -60,6 +62,25 @@ public class ManagerActor extends AbstractActor {
 
     private void processMQTTSubscribe(MQTTSubscribe subscribe) {
         log.info("ManagerActor->processSubscribe {}", subscribe);
+
+        ByteStringBuilder subscribeResult = new ByteStringBuilder();
+        for (MQTTSubscribeTopic topic: subscribe.getPayload().getTopics()) {
+            subscribeResult.addOne((byte)0x00);
+        }
+
+        byte fixB1 = (byte)(MQTTMessageType.SUBSCRIBE_ACK << 4);
+        byte fixB2 = (byte)(subscribeResult.length() + 2);
+
+        ByteStringBuilder byteStringBuilder = new ByteStringBuilder();
+        ByteString byteString = byteStringBuilder
+                .addOne(fixB1)
+                .addOne(fixB2)
+                .addOne((byte)(subscribe.getId() >> 8))
+                .addOne((byte)(subscribe.getId() & 255))
+                .result()
+                .concat(subscribeResult.result());
+
+        getSender().tell(byteString, getSender());
     }
 
     private void processAny(Object o) {

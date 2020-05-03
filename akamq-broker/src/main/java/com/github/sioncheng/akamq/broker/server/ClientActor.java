@@ -209,7 +209,7 @@ public class ClientActor extends AbstractActor {
     private void processSubscribe(MQTTFixHeader mqttFixHeader, ByteIterator iterator) {
         log.info("ClientActor->processSubscribe {} {}", mqttFixHeader, iterator);
 
-        int id = iterator.next() * 128 + iterator.next();
+        int id = iterator.next() * 256 + iterator.next();
 
         List<MQTTSubscribeTopic> topics = new ArrayList<>(4);
         while (true) {
@@ -234,6 +234,7 @@ public class ClientActor extends AbstractActor {
                 .build();
 
         MQTTSubscribe mqttSubscribe = MQTTSubscribe.builder()
+                .id(id)
                 .payload(mqttSubscribePayload)
                 .build();
 
