@@ -111,6 +111,9 @@ public class ClientActor extends AbstractActor {
                 case MQTTMessageType.SUBSCRIBE:
                     processSubscribe(fixHeader, iterator);
                     break;
+                case MQTTMessageType.PING_REQUEST:
+                    processPingRequest(fixHeader, iterator);
+                    break;
                 default:
                     break;
             }
@@ -239,6 +242,12 @@ public class ClientActor extends AbstractActor {
                 .build();
 
         manager.tell(mqttSubscribe, getSelf());
+    }
+
+    private void processPingRequest(MQTTFixHeader fixHeader, ByteIterator iterator) {
+        log.info("ClientActor->processPingRequest {}", fixHeader, iterator);
+
+        manager.tell(MQTTPingRequest.builder().build(), getSelf());
     }
 
     private String takeString(ByteIterator iterator) {

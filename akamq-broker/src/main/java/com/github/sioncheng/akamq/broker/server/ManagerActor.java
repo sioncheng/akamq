@@ -6,10 +6,7 @@ import akka.event.Logging;
 import akka.event.LoggingAdapter;
 import akka.util.ByteString;
 import akka.util.ByteStringBuilder;
-import com.github.sioncheng.akamq.mqtt.MQTTConnect;
-import com.github.sioncheng.akamq.mqtt.MQTTMessageType;
-import com.github.sioncheng.akamq.mqtt.MQTTSubscribe;
-import com.github.sioncheng.akamq.mqtt.MQTTSubscribeTopic;
+import com.github.sioncheng.akamq.mqtt.*;
 
 /**
  * @author cyq
@@ -32,6 +29,7 @@ public class ManagerActor extends AbstractActor {
         return receiveBuilder()
                 .match(MQTTConnect.class, this::processMQTTConnect)
                 .match(MQTTSubscribe.class, this::processMQTTSubscribe)
+                .match(MQTTPingRequest.class, this::processMQTTPingRequest)
                 .matchAny(this::processAny).build();
     }
 
@@ -81,6 +79,17 @@ public class ManagerActor extends AbstractActor {
                 .concat(subscribeResult.result());
 
         getSender().tell(byteString, getSender());
+    }
+
+    private void processMQTTPingRequest(MQTTPingRequest request) {
+        log.info("ManagerActor->processMQTTPingRequest {}", request);
+
+        byte fixB1 = (byte)(MQTTMessageType.PING_RESPONSE << 4);
+        byte fixB2 = 0x00;
+
+        ByteString byteString = ByteString.fromArray(new byte[]{fixB1, fixB2});
+
+        getSender().tell(byteString, getSelf());
     }
 
     private void processAny(Object o) {
