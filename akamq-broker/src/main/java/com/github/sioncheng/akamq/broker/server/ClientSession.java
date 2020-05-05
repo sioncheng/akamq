@@ -3,7 +3,6 @@ package com.github.sioncheng.akamq.broker.server;
 import akka.actor.ActorRef;
 import lombok.*;
 import org.apache.commons.lang3.StringUtils;
-import scala.Int;
 
 /**
  * @author cyq

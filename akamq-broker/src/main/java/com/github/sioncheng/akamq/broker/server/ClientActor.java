@@ -9,6 +9,7 @@ import akka.io.Tcp;
 import akka.io.TcpMessage;
 import akka.util.ByteIterator;
 import akka.util.ByteString;
+import com.github.sioncheng.akamq.broker.message.GoOffline;
 import com.github.sioncheng.akamq.mqtt.*;
 
 import java.io.UnsupportedEncodingException;
@@ -30,8 +31,6 @@ public class ClientActor extends AbstractActor {
 
     final LoggingAdapter log;
 
-    int status;
-
     ByteString buf;
 
     String clientId;
@@ -41,7 +40,6 @@ public class ClientActor extends AbstractActor {
         this.remote = remote;
         this.manager = manager;
         this.log = Logging.getLogger(getContext().getSystem(), "client-actor");
-        this.status = 0;
         this.buf = null;
         this.clientId = null;
 
@@ -106,11 +104,15 @@ public class ClientActor extends AbstractActor {
                 .remainLength(remainLength)
                 .build();
 
+        log.info("ClientActor->processReceived message type {}", messageType);
+
         try {
             switch (messageType) {
                 case MQTTMessageType.CONNECT:
                     processConnect(fixHeader, iterator);
-                    this.status = 1;
+                    break;
+                case MQTTMessageType.DISCONNECT:
+                    processDisconnect(fixHeader, iterator);
                     break;
                 case MQTTMessageType.SUBSCRIBE:
                     processSubscribe(fixHeader, iterator);
@@ -132,8 +134,8 @@ public class ClientActor extends AbstractActor {
             }
 
         } catch (ParseMQTTException ex) {
-            log.error("ClientActor->processReceived", ex);
-            connection.tell(TcpMessage.abort(), getSelf());
+            log.error("ClientActor->processReceived {}", ex);
+            connection.tell(TcpMessage.close(), getSelf());
         }
 
     }
@@ -146,7 +148,7 @@ public class ClientActor extends AbstractActor {
 
 
         if (!"MQTT".equals(s)) {
-            throw new ParseMQTTException(500, "not mqtt");
+            throw new ParseMQTTException(500, s + " is not mqtt");
         }
 
         byte protocolLevel = bytes[6];
@@ -215,6 +217,18 @@ public class ClientActor extends AbstractActor {
                 .build();
 
         manager.tell(mqttConnect, getSelf());
+    }
+
+    private void processDisconnect(MQTTFixHeader mqttFixHeader, ByteIterator iterator) {
+        log.info("ClientActor->processDisconnect {} {}", mqttFixHeader, iterator);
+
+        MQTTDisconnect mqttDisconnect = MQTTDisconnect.builder()
+                .clientId(this.clientId)
+                .build();
+
+        manager.tell(mqttDisconnect, getSelf());
+
+        connection.tell(TcpMessage.close(), getSelf());
     }
 
     private void processSubscribe(MQTTFixHeader mqttFixHeader, ByteIterator iterator) {

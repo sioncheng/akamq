@@ -5,6 +5,8 @@ import akka.actor.ActorRef;
 import akka.actor.Props;
 import akka.event.Logging;
 import akka.event.LoggingAdapter;
+import com.github.sioncheng.akamq.broker.message.Publish;
+import com.github.sioncheng.akamq.broker.message.Subscribe;
 import com.github.sioncheng.akamq.mqtt.MQTTPublish;
 import com.github.sioncheng.akamq.mqtt.MQTTSubscribe;
 
@@ -30,17 +32,17 @@ public class PubSubActor extends AbstractActor {
     @Override
     public Receive createReceive() {
         return receiveBuilder()
-                .match(MQTTSubscribe.class, this::processSubscription)
-                .match(MQTTPublish.class, this::processPublish)
+                .match(Subscribe.class, this::processSubscription)
+                .match(Publish.class, this::processPublish)
                 .build();
     }
 
-    private void processSubscription(MQTTSubscribe mqttSubscribe) {
-        log.info("PubSubActor->processSubscription {}", mqttSubscribe);
+    private void processSubscription(Subscribe subscribe) {
+        log.info("PubSubActor->processSubscription {}", subscribe);
     }
 
-    private void processPublish(MQTTPublish mqttPublish) {
-        log.info("PubSubActor->processPublish {}", mqttPublish);
+    private void processPublish(Publish publish) {
+        log.info("PubSubActor->processPublish {}", publish);
     }
 }
 

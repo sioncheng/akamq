@@ -1,4 +1,4 @@
-package com.github.sioncheng.akamq.broker.server;
+package com.github.sioncheng.akamq.broker.message;
 
 import lombok.Builder;
 import lombok.Data;

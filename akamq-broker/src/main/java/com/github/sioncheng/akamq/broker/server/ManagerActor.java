@@ -1,12 +1,17 @@
 package com.github.sioncheng.akamq.broker.server;
 
 import akka.actor.AbstractActor;
+import akka.actor.ActorRef;
 import akka.actor.Props;
 import akka.event.Logging;
 import akka.event.LoggingAdapter;
 import akka.util.ByteString;
 import akka.util.ByteStringBuilder;
+import com.github.sioncheng.akamq.broker.message.GoOffline;
 import com.github.sioncheng.akamq.mqtt.*;
+
+import java.util.HashMap;
+import java.util.Map;
 
 /**
  * @author cyq
@@ -16,7 +21,10 @@ public class ManagerActor extends AbstractActor {
 
     final LoggingAdapter log;
 
+    final Map<String, ActorRef> connectedActors ;
+
     public ManagerActor() {
+        connectedActors = new HashMap<>();
         log = Logging.getLogger(getContext().getSystem(), "manager-actor");
     }
 
@@ -40,6 +48,7 @@ public class ManagerActor extends AbstractActor {
         byte fixB1 = MQTTMessageType.CONNECT_ACK << 4;
         byte fixB2 = 2;
         byte varB1 = 0; //todo, 0 or 1 according clean session flag
+
         //todo
         /**
          * 0	0x00连接已接受	连接已被服务端接受
@@ -50,12 +59,28 @@ public class ManagerActor extends AbstractActor {
          * 5	0x05连接已拒绝，未授权	客户端未被授权连接到此服务器
          * 6-255		保留
          */
-        byte varB2 = 0; //
+        byte varB2 = 0;
 
-        ByteString byteString = ByteString.fromArray(new byte[]{fixB1, fixB2, varB1, varB2});
+        boolean b = Authority.auth(mqttConnect.getConnectPayload().getUsername(),
+                mqttConnect.getConnectPayload().getPassword());
 
-        getSender().tell(byteString, getSelf());
+        if (b) {
+            ActorRef pre = connectedActors.get(mqttConnect.getConnectPayload().getClientId());
+            if (null != pre) {
+                pre.tell(new GoOffline(), getSelf());
+            }
 
+
+            ByteString byteString = ByteString.fromArray(new byte[]{fixB1, fixB2, varB1, varB2});
+            getSender().tell(byteString, getSelf());
+
+            connectedActors.put(mqttConnect.getConnectPayload().getClientId(), getSender());
+
+        } else {
+            varB2 = 4; //
+            ByteString byteString = ByteString.fromArray(new byte[]{fixB1, fixB2, varB1, varB2});
+            getSender().tell(byteString, getSelf());
+        }
 
     }
 
@@ -96,6 +121,12 @@ public class ManagerActor extends AbstractActor {
         getSender().tell(byteString, getSender());
 
 
+    }
+
+    private void processMQTTDisconnect(MQTTDisconnect disconnect) {
+        log.info("ManagerActor->processMQTTDisconnect {}", disconnect);
+
+        connectedActors.remove(disconnect.getClientId());
     }
 
     private void processMQTTPingRequest(MQTTPingRequest request) {
