@@ -30,6 +30,7 @@ public class ManagerActor extends AbstractActor {
                 .match(MQTTConnect.class, this::processMQTTConnect)
                 .match(MQTTSubscribe.class, this::processMQTTSubscribe)
                 .match(MQTTPingRequest.class, this::processMQTTPingRequest)
+                .match(MQTTPublish.class, this::processPublish)
                 .matchAny(this::processAny).build();
     }
 
@@ -64,6 +65,18 @@ public class ManagerActor extends AbstractActor {
         ByteStringBuilder subscribeResult = new ByteStringBuilder();
         for (MQTTSubscribeTopic topic: subscribe.getPayload().getTopics()) {
             subscribeResult.addOne((byte)0x00);
+
+            ClientSession clientSession = ClientSession.builder()
+                    .clientActor(getSender())
+                    .clientId(subscribe.getClientId())
+                    .build();
+
+            ClientSession pre = PubSubManager.subscribe(topic.getTopicFilter(), clientSession);
+
+            if (null != pre) {
+                clientSession.getClientActor().tell(new GoOffline(), getSelf());
+            }
+
         }
 
         byte fixB1 = (byte)(MQTTMessageType.SUBSCRIBE_ACK << 4);
@@ -78,7 +91,11 @@ public class ManagerActor extends AbstractActor {
                 .result()
                 .concat(subscribeResult.result());
 
+
+
         getSender().tell(byteString, getSender());
+
+
     }
 
     private void processMQTTPingRequest(MQTTPingRequest request) {
@@ -90,6 +107,46 @@ public class ManagerActor extends AbstractActor {
         ByteString byteString = ByteString.fromArray(new byte[]{fixB1, fixB2});
 
         getSender().tell(byteString, getSelf());
+    }
+
+    private void processPublish(MQTTPublish mqttPublish) {
+        log.info("ManagerActor->processPublish {}", mqttPublish);
+        boolean b = true;
+
+        switch (mqttPublish.getQosLevel()) {
+            case 0:
+                break;
+            case 1:
+                if (b) {
+                    byte fixB1 = (byte)(MQTTMessageType.PUBLISH_ACK << 4);
+                    byte fixB2 = 2;
+                    byte pidB1 = (byte)(mqttPublish.getPacketId() >> 8);
+                    byte pidB2 = (byte)(mqttPublish.getPacketId() & 255);
+
+                    ByteString byteString = ByteString.fromArray(new byte[]{fixB1,fixB2,pidB1,pidB2});
+
+                    getSender().tell(byteString, getSelf());
+                }
+                break;
+            case 2:
+                break;
+            default:
+                break;
+        }
+
+        Thread t  = new Thread(new Runnable() {
+            @Override
+            public void run() {
+                try {
+                    Thread.sleep(10 * 1000);
+                    PubSubManager.publish(mqttPublish, getSelf(), log);
+                } catch (Exception ex) {
+                    ex.printStackTrace();
+                }
+            }
+        });
+
+        t.run();
     }
 
     private void processAny(Object o) {

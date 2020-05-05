@@ -19,4 +19,6 @@ public class MQTTSubscribe {
     private Integer id;
 
     private MQTTSubscribePayload payload;
+
+    private String clientId;
 }

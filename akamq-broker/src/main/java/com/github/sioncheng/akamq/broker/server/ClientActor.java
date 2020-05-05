@@ -11,6 +11,7 @@ import akka.util.ByteIterator;
 import akka.util.ByteString;
 import com.github.sioncheng.akamq.mqtt.*;
 
+import java.io.UnsupportedEncodingException;
 import java.net.InetSocketAddress;
 import java.util.ArrayList;
 import java.util.List;
@@ -33,6 +34,8 @@ public class ClientActor extends AbstractActor {
 
     ByteString buf;
 
+    String clientId;
+
     public ClientActor(ActorRef connection, InetSocketAddress remote, ActorRef manager) {
         this.connection = connection;
         this.remote = remote;
@@ -40,6 +43,7 @@ public class ClientActor extends AbstractActor {
         this.log = Logging.getLogger(getContext().getSystem(), "client-actor");
         this.status = 0;
         this.buf = null;
+        this.clientId = null;
 
         //sign death pact: this actor stops when the connection(actor) is closed
         getContext().watch(connection);
@@ -113,6 +117,9 @@ public class ClientActor extends AbstractActor {
                     break;
                 case MQTTMessageType.PING_REQUEST:
                     processPingRequest(fixHeader, iterator);
+                    break;
+                case MQTTMessageType.PUBLISH:
+                    processPublish(fixHeader, iterator);
                     break;
                 default:
                     break;
@@ -191,6 +198,7 @@ public class ClientActor extends AbstractActor {
         }
 
         //
+        this.clientId = clientId;
         MQTTConnectPayload mqttConnectPayload = MQTTConnectPayload.builder()
                 .clientId(clientId)
                 .willTopic(willTopic)
@@ -239,6 +247,7 @@ public class ClientActor extends AbstractActor {
         MQTTSubscribe mqttSubscribe = MQTTSubscribe.builder()
                 .id(id)
                 .payload(mqttSubscribePayload)
+                .clientId(this.clientId)
                 .build();
 
         manager.tell(mqttSubscribe, getSelf());
@@ -250,6 +259,45 @@ public class ClientActor extends AbstractActor {
         manager.tell(MQTTPingRequest.builder().build(), getSelf());
     }
 
+    private void processPublish(MQTTFixHeader fixHeader, ByteIterator iterator) {
+        log.info("ClientActor->processPublish {} {}", fixHeader, iterator);
+
+        byte[] rawTopic = takeRawString(iterator);
+        if (null == rawTopic) {
+            log.error("ClientActor->processPublish no topic");
+            return;
+        }
+
+        try {
+            String topic = new String(rawTopic);
+
+            Integer packetId = null;
+            if (fixHeader.getQosLevel() > 0) {
+                packetId = iterator.next() * 256 + iterator.next();
+            }
+
+            byte[] rawMessagePayload = iterator.getBytes(iterator.len());
+            String messagePayload = new String(rawMessagePayload, "UTF-8");
+
+            log.info("ClientActor->processPublish {} {}", topic, messagePayload);
+
+            MQTTPublish mqttPublish = MQTTPublish.builder()
+                    .qosLevel(fixHeader.getQosLevel())
+                    .topic(topic)
+                    .packetId(packetId)
+                    .messagePayload(messagePayload)
+                    .rawTopic(rawTopic)
+                    .rawMessagePayload(rawMessagePayload)
+                    .build();
+
+            manager.tell(mqttPublish, getSender());
+
+        } catch (UnsupportedEncodingException ex) {
+            log.error("ClientActor->processPublish", ex);
+
+        }
+    }
+
     private String takeString(ByteIterator iterator) {
         if (!iterator.hasNext()) {
             return null;
@@ -257,6 +305,15 @@ public class ClientActor extends AbstractActor {
 
         int len = iterator.next() * 128 + iterator.next();
         return new String(iterator.getBytes(len));
+    }
+
+    private byte[] takeRawString(ByteIterator iterator) {
+        if (!iterator.hasNext()) {
+            return null;
+        }
+
+        int len = iterator.next() * 128 + iterator.next();
+        return iterator.getBytes(len);
     }
 
     private void processConnectionClosed(Tcp.ConnectionClosed connectionClosed) {
@@ -267,5 +324,9 @@ public class ClientActor extends AbstractActor {
         log.info("ClientActor->processByteString {}", byteString);
 
         connection.tell(TcpMessage.write(byteString), getSelf());
+    }
+
+    private void processGoOffline(GoOffline goOffline) {
+        log.info("ClientActor->processGoOffline {}", goOffline);
     }
 }

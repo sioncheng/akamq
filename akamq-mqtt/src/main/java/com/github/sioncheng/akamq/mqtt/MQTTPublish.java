@@ -5,25 +5,28 @@ import lombok.Builder;
 import lombok.Data;
 import lombok.NoArgsConstructor;
 
-import java.nio.ByteBuffer;
-
 /**
  * @author cyq
- * @create 2020-05-01 10:52 PM
+ * @create 2020-05-04 7:02 PM
  */
+
 @Data
 @Builder
 @AllArgsConstructor
 @NoArgsConstructor
-public class MQTTFixHeader {
-
-    private Integer messageType;
-
-    private Integer dupFlag;
+public class MQTTPublish {
 
     private Integer qosLevel;
 
     private Integer retain;
 
-    private Integer remainLength;
+    private String topic;
+
+    private Integer packetId;
+
+    private String messagePayload;
+
+    private byte[] rawTopic;
+
+    private byte[] rawMessagePayload;
 }
