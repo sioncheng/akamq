@@ -3,6 +3,7 @@ package com.github.sioncheng.akamq.broker.server;
 import akka.actor.AbstractActor;
 import akka.actor.ActorRef;
 import akka.actor.Props;
+import com.github.sioncheng.akamq.broker.message.Publish;
 
 /**
  * @author cyq
@@ -25,6 +26,13 @@ public class ClientSessionActor extends AbstractActor {
 
     @Override
     public Receive createReceive() {
-        return null;
+
+        return receiveBuilder()
+                .match(Publish.class, this::processPublish)
+                .build();
+    }
+
+    private void processPublish(Publish publish) {
+
     }
 }

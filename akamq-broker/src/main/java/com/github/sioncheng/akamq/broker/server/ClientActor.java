@@ -123,6 +123,9 @@ public class ClientActor extends AbstractActor {
                 case MQTTMessageType.PUBLISH:
                     processPublish(fixHeader, iterator);
                     break;
+                case MQTTMessageType.PUBLISH_ACK:
+                    processPublishAck(fixHeader, iterator);
+                    break;
                 default:
                     break;
             }
@@ -234,7 +237,7 @@ public class ClientActor extends AbstractActor {
     private void processSubscribe(MQTTFixHeader mqttFixHeader, ByteIterator iterator) {
         log.info("ClientActor->processSubscribe {} {}", mqttFixHeader, iterator);
 
-        int id = iterator.next() * 256 + iterator.next();
+        int packetId = iterator.next() * 256 + iterator.next();
 
         List<MQTTSubscribeTopic> topics = new ArrayList<>(4);
         while (true) {
@@ -259,7 +262,7 @@ public class ClientActor extends AbstractActor {
                 .build();
 
         MQTTSubscribe mqttSubscribe = MQTTSubscribe.builder()
-                .id(id)
+                .packetId(packetId)
                 .payload(mqttSubscribePayload)
                 .clientId(this.clientId)
                 .build();
@@ -304,12 +307,25 @@ public class ClientActor extends AbstractActor {
                     .rawMessagePayload(rawMessagePayload)
                     .build();
 
-            manager.tell(mqttPublish, getSender());
+            manager.tell(mqttPublish, getSelf());
 
         } catch (UnsupportedEncodingException ex) {
             log.error("ClientActor->processPublish", ex);
 
         }
+    }
+
+    private void processPublishAck(MQTTFixHeader fixHeader, ByteIterator iterator) {
+        log.info("ClientActor->processPublishAck {}", fixHeader);
+
+        int packetId = iterator.next() * 256 + iterator.next();
+
+        MQTTPublishAck mqttPublishAck = MQTTPublishAck.builder()
+                .clientId(this.clientId)
+                .packetId(packetId)
+                .build();
+
+        manager.tell(mqttPublishAck, getSelf());
     }
 
     private String takeString(ByteIterator iterator) {

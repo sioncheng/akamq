@@ -7,18 +7,16 @@ import lombok.NoArgsConstructor;
 
 /**
  * @author cyq
- * @create 2020-05-03 2:09 PM
+ * @create 2020-05-06 11:37 AM
  */
 
 @Data
 @Builder
 @AllArgsConstructor
 @NoArgsConstructor
-public class MQTTSubscribe {
-
-    private Integer packetId;
-
-    private MQTTSubscribePayload payload;
+public class MQTTPublishAck {
 
     private String clientId;
+
+    private Integer packetId;
 }
