@@ -9,6 +9,7 @@ import akka.util.ByteString;
 import akka.util.ByteStringBuilder;
 import com.github.sioncheng.akamq.broker.message.GoOffline;
 import com.github.sioncheng.akamq.broker.message.Publish;
+import com.github.sioncheng.akamq.broker.persist.InMemoryPersist;
 import com.github.sioncheng.akamq.mqtt.*;
 
 import java.util.HashMap;
@@ -27,13 +28,16 @@ public class ManagerActor extends AbstractActor {
 
     final ActorRef pubSubActor;
 
-    final Map<String, Map<String, ClientSession>> subscriptionMap;
+    final Map<String, Map<String, ActorRef>> subscriptionMap;
+
+    final InMemoryPersist inMemoryPersist;
 
     public ManagerActor() {
         connectedActors = new HashMap<>();
         log = Logging.getLogger(getContext().getSystem(), "manager-actor");
         pubSubActor = getContext().getSystem().actorOf(PubSubActor.props(getSelf()));
         subscriptionMap = new ConcurrentHashMap<>();
+        inMemoryPersist = new InMemoryPersist();
     }
 
     public static Props props() {
@@ -48,7 +52,8 @@ public class ManagerActor extends AbstractActor {
                 .match(MQTTSubscribe.class, this::processMQTTSubscribe)
                 .match(MQTTPingRequest.class, this::processMQTTPingRequest)
                 .match(MQTTPublish.class, this::processMQTTPublish)
-                .match(Publish.class, this::processMQTTPublish)
+                .match(Publish.class, this::processSelfPublish)
+                .match(MQTTPublishAck.class, this::processMQTTPublishAck)
                 .matchAny(this::processAny).build();
     }
 
@@ -84,7 +89,8 @@ public class ManagerActor extends AbstractActor {
             ByteString byteString = ByteString.fromArray(new byte[]{fixB1, fixB2, varB1, varB2});
             getSender().tell(byteString, getSelf());
 
-            connectedActors.put(mqttConnect.getConnectPayload().getClientId(), getSender());
+            ActorRef clientSessionActor = createClientSession(getSender());
+            connectedActors.put(mqttConnect.getConnectPayload().getClientId(), clientSessionActor);
 
         } else {
             varB2 = 4; //
@@ -101,15 +107,12 @@ public class ManagerActor extends AbstractActor {
         for (MQTTSubscribeTopic topic: subscribe.getPayload().getTopics()) {
             subscribeResult.addOne((byte)0x00);
 
-            ClientSession clientSession = ClientSession.builder()
-                    .clientActor(getSender())
-                    .clientId(subscribe.getClientId())
-                    .build();
+            ActorRef clientSession = connectedActors.get(subscribe.getClientId());
 
-            ClientSession pre = subscribe(topic.getTopicFilter(), clientSession);
+            ActorRef pre = subscribe(topic.getTopicFilter(), subscribe.getClientId(), clientSession);
 
             if (null != pre) {
-                clientSession.getClientActor().tell(new GoOffline(), getSelf());
+                pre.tell(new GoOffline(), getSelf());
             }
 
         }
@@ -156,6 +159,10 @@ public class ManagerActor extends AbstractActor {
         //todo, persist mqtt publish
         boolean b = true;
 
+        if (mqttPublish.getQosLevel() == 1) {
+            b = inMemoryPersist.savePublish(mqttPublish);
+        }
+
         switch (mqttPublish.getQosLevel()) {
             case 0:
                 break;
@@ -179,15 +186,35 @@ public class ManagerActor extends AbstractActor {
 
         Publish publish = Publish.builder()
                 .mqttPublish(mqttPublish)
-                .clientActor(getSender())
                 .build();
 
         self().tell(publish, getSelf());
     }
 
-    private void processMQTTPublish(Publish publish) {
+    private void processSelfPublish(Publish publish) {
         log.info("ManagerActor->processPublish {}", publish);
-        publish(publish.getMqttPublish());
+
+        MQTTPublish mqttPublish = publish.getMqttPublish();
+        Map<String, ActorRef> map = subscriptionMap.get(mqttPublish.getTopic());
+        for (Map.Entry<String, ActorRef> kv:map.entrySet()){
+            ActorRef clientSession = kv.getValue();
+
+            clientSession.tell(mqttPublish, getSelf());
+        }
+
+        Integer packetId = publish.getMqttPublish().getPacketId();
+        if (null != packetId) {
+            inMemoryPersist.removePublish(publish.getMqttPublish().getPacketId());
+        }
+    }
+
+    private void processMQTTPublishAck(MQTTPublishAck mqttPublishAck) {
+        log.info("ManagerActor->processMQTTPublishAck {}", mqttPublishAck);
+
+        ActorRef clientSessionActor = connectedActors.get(mqttPublishAck.getClientId());
+        if (null != clientSessionActor) {
+            clientSessionActor.tell(mqttPublishAck, getSelf());
+        }
     }
 
     private void processAny(Object o) {
@@ -195,60 +222,23 @@ public class ManagerActor extends AbstractActor {
         log.info("ManagerActor->processAny {}", o);
     }
 
-    private ClientSession subscribe(String topic, ClientSession clientSession) {
-        Map<String, ClientSession> map = subscriptionMap.get(topic);
+    private ActorRef subscribe(String topic, String clientId, ActorRef clientSession) {
+        Map<String, ActorRef> map = subscriptionMap.get(topic);
         if (null == map) {
             map = new HashMap<>();
             subscriptionMap.put(topic, map);
         }
 
-        ClientSession pre = map.get(clientSession.getClientId());
+        ActorRef pre = map.get(clientId);
 
-        map.put(clientSession.getClientId(), clientSession);
+        map.put(clientId, clientSession);
 
         return pre;
 
     }
 
-    private boolean publish(MQTTPublish mqttPublish) {
-
-        Map<String, ClientSession> map = subscriptionMap.get(mqttPublish.getTopic());
-        for (Map.Entry<String, ClientSession> kv:map.entrySet()){
-            ClientSession clientSession = kv.getValue();
-
-            byte fixB1 = MQTTMessageType.PUBLISH << 4;
-            byte dupFlag = 0;
-            byte qosLevel = (byte)(mqttPublish.getQosLevel().byteValue() << 1);
-            fixB1 = (byte)(fixB1 + dupFlag + qosLevel);
-
-            byte[] topic = mqttPublish.getRawTopic();
-            int packetId = clientSession.getAndIncPacketId();
-
-            byte[] messagePayload = mqttPublish.getRawMessagePayload();
-
-            int remainLength = 2 + topic.length + messagePayload.length;
-            if (qosLevel > 1) {
-                remainLength += 2;
-            }
-
-            ByteStringBuilder byteStringBuilder = new ByteStringBuilder();
-            byteStringBuilder.addOne(fixB1);
-            byteStringBuilder.append(MQTTUtil.remainLengthToBytes(remainLength));
-            byteStringBuilder.addOne((byte)(topic.length / 128));
-            byteStringBuilder.addOne((byte)(topic.length % 128));
-            byteStringBuilder.append(ByteString.fromArray(topic));
-            if (qosLevel > 1) {
-                byteStringBuilder.addOne((byte)(packetId / 256));
-                byteStringBuilder.addOne((byte)(packetId & 255));
-            }
-            byteStringBuilder.append(ByteString.fromArray(messagePayload));
-
-            ByteString byteString = byteStringBuilder.result();
-            log.info("ManagerActor->publish {}", byteString);
-
-            clientSession.getClientActor().tell(byteString, getSelf());
-        }
-
-        return true;
+    private ActorRef createClientSession(ActorRef clientActor) {
+        Props props = ClientSessionActor.props(getSelf(), clientActor);
+        return getContext().getSystem().actorOf(props);
     }
 }
