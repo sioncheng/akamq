@@ -300,6 +300,7 @@ public class ClientActor extends AbstractActor {
 
             MQTTPublish mqttPublish = MQTTPublish.builder()
                     .qosLevel(fixHeader.getQosLevel())
+                    .clientId(this.clientId)
                     .topic(topic)
                     .packetId(packetId)
                     .messagePayload(messagePayload)

@@ -16,6 +16,8 @@ import lombok.NoArgsConstructor;
 @NoArgsConstructor
 public class MQTTPublish {
 
+    private String clientId;
+
     private Integer qosLevel;
 
     private Integer retain;

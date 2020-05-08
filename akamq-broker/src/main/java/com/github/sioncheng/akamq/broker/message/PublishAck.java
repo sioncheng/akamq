@@ -1,7 +1,5 @@
 package com.github.sioncheng.akamq.broker.message;
 
-import akka.actor.ActorRef;
-import com.github.sioncheng.akamq.mqtt.MQTTPublish;
 import lombok.AllArgsConstructor;
 import lombok.Builder;
 import lombok.Data;
@@ -9,16 +7,16 @@ import lombok.NoArgsConstructor;
 
 /**
  * @author cyq
- * @create 2020-05-05 7:33 PM
+ * @create 2020-05-08 11:07 AM
  */
 
 @Data
 @Builder
 @AllArgsConstructor
 @NoArgsConstructor
-public class Publish {
+public class PublishAck {
 
-    private Long id;
+    private Publish publish;
 
-    private MQTTPublish mqttPublish;
+    private String clientId;
 }

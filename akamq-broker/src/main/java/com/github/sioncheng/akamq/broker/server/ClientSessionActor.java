@@ -9,12 +9,14 @@ import akka.util.ByteString;
 import akka.util.ByteStringBuilder;
 import com.github.sioncheng.akamq.broker.message.GoOffline;
 import com.github.sioncheng.akamq.broker.message.Publish;
-import com.github.sioncheng.akamq.broker.persist.InMemoryPersist;
+import com.github.sioncheng.akamq.broker.message.PublishAck;
 import com.github.sioncheng.akamq.mqtt.MQTTMessageType;
 import com.github.sioncheng.akamq.mqtt.MQTTPublish;
 import com.github.sioncheng.akamq.mqtt.MQTTPublishAck;
 
-import java.util.Random;
+import java.util.Iterator;
+import java.util.LinkedList;
+import java.util.List;
 
 /**
  * @author cyq
@@ -22,26 +24,29 @@ import java.util.Random;
  */
 public class ClientSessionActor extends AbstractActor {
 
+    final LoggingAdapter log;
+
     final ActorRef manager;
 
     final ActorRef clientActor;
 
-    final InMemoryPersist inMemoryPersist;
+    final String clientId;
 
-    final LoggingAdapter log;
+    final List<WaitWindowItem> waitWindowItems;
 
     int packetId;
 
-    public ClientSessionActor(ActorRef manager, ActorRef clientActor) {
+    public ClientSessionActor(ActorRef manager, ActorRef clientActor, String clientId) {
+        this.log = Logging.getLogger(getContext().getSystem(), "cs-actor");
         this.manager = manager;
         this.clientActor = clientActor;
-        this.inMemoryPersist = new InMemoryPersist();
-        this.log = Logging.getLogger(getContext().getSystem(), "cs-actor");
+        this.clientId = clientId;
+        this.waitWindowItems = new LinkedList<>();
         this.packetId = (int)(System.currentTimeMillis() % 1000);
     }
 
-    public static Props props(ActorRef manager, ActorRef clientActor) {
-        return Props.create(ClientSessionActor.class, manager, clientActor);
+    public static Props props(ActorRef manager, ActorRef clientActor, String clientId) {
+        return Props.create(ClientSessionActor.class, manager, clientActor, clientId);
     }
 
     @Override
@@ -49,7 +54,6 @@ public class ClientSessionActor extends AbstractActor {
 
         return receiveBuilder()
                 .match(GoOffline.class, this::processGoOffline)
-                .match(MQTTPublish.class, this::processMQTTPublish)
                 .match(Publish.class, this::processSelfPublish)
                 .match(MQTTPublishAck.class, this::processPublishAck)
                 .build();
@@ -62,34 +66,44 @@ public class ClientSessionActor extends AbstractActor {
 
     }
 
-    private void processMQTTPublish(MQTTPublish mqttPublish) {
-        log.info("ClientSessionActor->processMQTTPublish");
-
-        if (mqttPublish.getQosLevel() == 0) {
-            publish(mqttPublish);
-        } else {
-            inMemoryPersist.savePublish(mqttPublish);
-            Publish publish = Publish.builder()
-                    .mqttPublish(mqttPublish)
-                    .build();
-            getSelf().tell(publish, getSelf());
-        }
-    }
-
     private void processSelfPublish(Publish publish) {
         log.info("ClientSessionActor->processSelfPublish {}", publish);
-        publish(publish.getMqttPublish());
+
+        publish(publish);
+
+        if (publish.getMqttPublish().getQosLevel() == 0) {
+            PublishAck publishAck = PublishAck.builder()
+                    .publish(publish)
+                    .clientId(this.clientId)
+                    .build();
+            getSender().tell(publishAck, getSelf());
+        }
     }
 
     private void processPublishAck(MQTTPublishAck mqttPublishAck) {
         log.info("ClientSessionActor->processPublishAck {}", mqttPublishAck);
-        Integer packetId = mqttPublishAck.getPacketId();
-        if (null != packetId) {
-            inMemoryPersist.removePublish(packetId);
+
+        Iterator<WaitWindowItem> itemIterator = waitWindowItems.iterator();
+        while (itemIterator.hasNext()) {
+            WaitWindowItem item = itemIterator.next();
+            if (item.getPacketId().equals(mqttPublishAck.getPacketId())) {
+
+                PublishAck publishAck = PublishAck.builder()
+                        .publish((Publish)item.getAttachment())
+                        .clientId(this.clientId)
+                        .build();
+
+                manager.tell(publishAck, getSelf());
+
+                itemIterator.remove();
+                return;
+            }
         }
     }
 
-    private void publish(MQTTPublish mqttPublish) {
+    private void publish(Publish publish) {
+        MQTTPublish mqttPublish = publish.getMqttPublish();
+
         byte fixB1 = MQTTMessageType.PUBLISH << 4;
         byte dupFlag = 0;
         byte qosLevel = (byte)(mqttPublish.getQosLevel().byteValue() << 1);
@@ -121,6 +135,16 @@ public class ClientSessionActor extends AbstractActor {
         log.info("ClientSessionActor->publish {}", byteString);
 
         clientActor.tell(byteString, getSelf());
+
+        if (qosLevel > 1) {
+            WaitWindowItem waitWindowItem = WaitWindowItem.builder()
+                    .packetId(packetId)
+                    .id(publish.getId())
+                    .attachment(publish)
+                    .build();
+
+            waitWindowItems.add(waitWindowItem);
+        }
     }
 
     private int getAndIncPacketId() {
