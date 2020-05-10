@@ -10,10 +10,12 @@ import akka.util.ByteStringBuilder;
 import com.github.sioncheng.akamq.broker.message.GoOffline;
 import com.github.sioncheng.akamq.broker.message.Publish;
 import com.github.sioncheng.akamq.broker.message.PublishAck;
+import com.github.sioncheng.akamq.broker.message.Heartbeat;
 import com.github.sioncheng.akamq.broker.persist.InMemoryPersistForManager;
 import com.github.sioncheng.akamq.broker.persist.PublishItem;
 import com.github.sioncheng.akamq.mqtt.*;
 
+import java.time.Duration;
 import java.util.*;
 
 /**
@@ -52,7 +54,20 @@ public class ManagerActor extends AbstractActor {
                 .match(Publish.class, this::processForwardPublish)
                 .match(MQTTPublishAck.class, this::processMQTTPublishAck)
                 .match(PublishAck.class, this::processPublishAck)
+                .match(Heartbeat.class, this::processHeartbeat)
                 .matchAny(this::processAny).build();
+    }
+
+    @Override
+    public void preStart() throws Exception {
+        super.preStart();
+        Duration d = Duration.ofSeconds(5);
+        getContext().getSystem().getScheduler().scheduleAtFixedRate(d,
+                d,
+                getSelf(),
+                Heartbeat.builder().timestamp(System.currentTimeMillis()).build(),
+                getContext().getDispatcher(),
+                getSelf());
     }
 
     private void processMQTTConnect(MQTTConnect mqttConnect) {
@@ -155,6 +170,20 @@ public class ManagerActor extends AbstractActor {
             inMemoryPersistMap.put(mqttPublish.getTopic(), inMemoryPersist);
         }
         Set<String> sub = subscriptionMap.get(mqttPublish.getTopic());
+        if (null == sub) {
+            if (mqttPublish.getQosLevel() == 1) {
+                byte fixB1 = (byte)(MQTTMessageType.PUBLISH_ACK << 4);
+                byte fixB2 = 2;
+                byte pidB1 = (byte)(mqttPublish.getPacketId() >> 8);
+                byte pidB2 = (byte)(mqttPublish.getPacketId() & 255);
+
+                ByteString byteString = ByteString.fromArray(new byte[]{fixB1,fixB2,pidB1,pidB2});
+
+                getSender().tell(byteString, getSelf());
+            }
+
+            return;
+        }
 
         long id = inMemoryPersist.savePublish(mqttPublish, sub);
 
@@ -236,6 +265,13 @@ public class ManagerActor extends AbstractActor {
             log.info("ManagerActor->processPublishAck all ack {}", publishItem);
 
             inMemoryPersistForManager.removePublish(publishItem.getId());
+        }
+    }
+
+    private void processHeartbeat(Heartbeat heartbeat) {
+        log.info("ManagerActor->processHeartbeat {}", heartbeat);
+        for (Map.Entry<String, ActorRef> kv: connectedActors.entrySet()){
+            kv.getValue().tell(heartbeat, getSelf());
         }
     }
 

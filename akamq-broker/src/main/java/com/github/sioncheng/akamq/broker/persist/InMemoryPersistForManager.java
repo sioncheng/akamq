@@ -20,7 +20,7 @@ public class InMemoryPersistForManager {
 
     public InMemoryPersistForManager() {
         publishItemList = new LinkedList<>();
-        idCounter = 0;
+        idCounter = 1;
     }
 
     public long savePublish(MQTTPublish mqttPublish, Set<String> targetClientIds) {
